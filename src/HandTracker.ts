@@ -49,28 +49,49 @@ export async function initHandTracker(): Promise<void> {
   document.body.appendChild(videoEl);
 
   // 3. 加载 Wasm
+  console.log("[HandTracker] 加载 WASM...");
   const wasmFileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+  console.log("[HandTracker] WASM 加载完成");
 
-  // 4. 创建 HandLandmarker
-  handLandmarker = await HandLandmarker.createFromOptions(wasmFileset, {
-    baseOptions: {
-      modelAssetPath: MODEL_PATH,
-      delegate: "GPU",
-    },
-    canvas: gpuCanvas as HTMLCanvasElement,
-    runningMode: "VIDEO",
-    numHands: 2,
-    minHandDetectionConfidence: 0.7,
-    minHandPresenceConfidence: 0.6,
-    minTrackingConfidence: 0.6,
-  });
+  // 4. 创建 HandLandmarker（优先 GPU，失败回退 CPU）
+  console.log("[HandTracker] 创建 HandLandmarker (GPU)...");
+  try {
+    handLandmarker = await HandLandmarker.createFromOptions(wasmFileset, {
+      baseOptions: {
+        modelAssetPath: MODEL_PATH,
+        delegate: "GPU",
+      },
+      canvas: gpuCanvas as HTMLCanvasElement,
+      runningMode: "VIDEO",
+      numHands: 2,
+      minHandDetectionConfidence: 0.7,
+      minHandPresenceConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+    });
+  } catch (gpuErr) {
+    console.warn("[HandTracker] GPU delegate 失败，回退 CPU:", gpuErr);
+    handLandmarker = await HandLandmarker.createFromOptions(wasmFileset, {
+      baseOptions: {
+        modelAssetPath: MODEL_PATH,
+        delegate: "CPU",
+      },
+      runningMode: "VIDEO",
+      numHands: 2,
+      minHandDetectionConfidence: 0.7,
+      minHandPresenceConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+    });
+  }
+  console.log("[HandTracker] HandLandmarker 创建完成");
 
   // 5. 启动摄像头
+  console.log("[HandTracker] 请求摄像头...");
   stream = await navigator.mediaDevices.getUserMedia({
     video: { width: 640, height: 480, facingMode: "user" },
   });
   videoEl.srcObject = stream;
   await videoEl.play();
+  console.log("[HandTracker] 摄像头已启动");
 
   // 6. 左下角预览
   if (!previewEl) previewEl = createPreview();
@@ -82,6 +103,7 @@ export async function initHandTracker(): Promise<void> {
   state.trackMode = "hand";
   state.trackError = "";
   lastDetectTime = 0;
+  console.log("[HandTracker] 初始化完成，手势追踪已启动");
 }
 
 /** 在 render loop 中调用，按需执行检测（不阻塞渲染） */
