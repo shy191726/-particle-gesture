@@ -2,8 +2,8 @@ import { HandLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { state } from "./state";
 import { processHandLandmarks } from "./GestureDetector";
 
-const WASM_BASE = "/wasm";
-const MODEL_PATH = "/models/hand_landmarker.task";
+const WASM_BASE = "./wasm";
+const MODEL_PATH = "./models/hand_landmarker.task";
 
 let handLandmarker: HandLandmarker | null = null;
 let videoEl: HTMLVideoElement | null = null;
