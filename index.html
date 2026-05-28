@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>3D粒子手势交互</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #050510; font-family: 'Segoe UI', system-ui, sans-serif; }
+    canvas#scene { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
+
+    /* 状态栏 */
+    #status {
+      position: fixed; top: 12px; left: 12px; z-index: 100;
+      color: #88ccff; font: 13px/1.5 monospace;
+      background: rgba(0,0,0,0.7); padding: 6px 12px; border-radius: 8px;
+      pointer-events: none; backdrop-filter: blur(4px);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    /* 右侧控制面板 */
+    #panel {
+      position: fixed; top: 0; right: 0; z-index: 200;
+      width: 72px; height: 100%;
+      background: rgba(10,10,30,0.75);
+      backdrop-filter: blur(12px);
+      border-left: 1px solid rgba(255,255,255,0.08);
+      display: flex; flex-direction: column; align-items: center;
+      padding: 16px 8px; gap: 6px;
+      overflow-y: auto;
+    }
+    #panel::-webkit-scrollbar { width: 0; }
+    #panel .label {
+      color: rgba(255,255,255,0.35); font: 10px/1 system-ui;
+      letter-spacing: 1px; text-transform: uppercase;
+      margin: 8px 0 4px; width: 100%; text-align: center;
+    }
+    .model-btn {
+      width: 56px; height: 56px; border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.6);
+      font: 10px/1.2 system-ui;
+      cursor: pointer; transition: all 0.25s;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; flex-shrink: 0;
+    }
+    .model-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.25); color: #fff; }
+    .model-btn.active {
+      background: rgba(100,180,255,0.2); border-color: rgba(100,180,255,0.5);
+      color: #8cf; box-shadow: 0 0 20px rgba(100,180,255,0.15);
+    }
+    .model-btn .icon { font-size: 18px; line-height: 1; }
+    .model-btn .name { font-size: 9px; opacity: 0.7; }
+
+    /* 颜色选择器 */
+    .color-picker-wrap {
+      position: relative; width: 44px; height: 44px; margin: 4px 0;
+    }
+    .color-picker-wrap input[type="color"] {
+      width: 44px; height: 44px; border: none; padding: 0;
+      background: none; cursor: pointer; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.2);
+    }
+    .color-picker-wrap input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+    .color-picker-wrap input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+
+    /* 滑块 */
+    .slider-wrap {
+      width: 100%; padding: 0 6px; margin: 4px 0;
+      display: flex; flex-direction: column; align-items: center;
+    }
+    .slider-wrap input[type="range"] {
+      width: 100%; height: 3px; -webkit-appearance: none;
+      background: rgba(255,255,255,0.15); border-radius: 2px;
+      outline: none;
+    }
+    .slider-wrap input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px;
+      border-radius: 50%; background: #8cf;
+      cursor: pointer; border: 2px solid rgba(255,255,255,0.3);
+    }
+    .slider-wrap .val {
+      color: rgba(255,255,255,0.5); font: 10px/1 monospace;
+      margin-top: 3px;
+    }
+
+    /* 全屏按钮 - 右下 */
+    #fullscreen-btn {
+      position: fixed; bottom: 20px; right: 88px; z-index: 150;
+      width: 40px; height: 40px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(10,10,30,0.6);
+      color: rgba(255,255,255,0.5);
+      backdrop-filter: blur(8px);
+      cursor: pointer; font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.25s;
+    }
+    #fullscreen-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+    /* 摄像头预览 - 左下 */
+    #camera-preview {
+      position: fixed; bottom: 16px; left: 16px; z-index: 150;
+      width: 160px; height: 120px; border-radius: 12px;
+      border: 2px solid rgba(255,255,255,0.12);
+      object-fit: cover; transform: scaleX(-1);
+      opacity: 0.7; cursor: grab;
+      transition: opacity 0.3s, border-color 0.3s;
+    }
+    #camera-preview:hover { opacity: 1; border-color: rgba(255,255,255,0.3); }
+
+    /* 加载遮罩 */
+    #loading-overlay {
+      position: fixed; inset: 0; z-index: 999;
+      background: #050510;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      transition: opacity 0.8s;
+    }
+    #loading-overlay.hidden { opacity: 0; pointer-events: none; }
+    #loading-overlay .spinner {
+      width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.06);
+      border-top-color: #8cf; border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    #loading-overlay p {
+      color: rgba(255,255,255,0.4); font: 13px/1.6 system-ui;
+      margin-top: 20px; letter-spacing: 1px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 提示悬浮球 */
+    #hint {
+      position: fixed; bottom: 160px; left: 50%; transform: translateX(-50%);
+      z-index: 50;
+      color: rgba(255,255,255,0.2); font: 12px/1.4 system-ui;
+      text-align: center; letter-spacing: 2px;
+      pointer-events: none;
+      transition: opacity 2s;
+    }
+  </style>
+  <script type="module" crossorigin src="/particle-gesture/assets/index-Ba5Xq0F6.js"></script>
+</head>
+<body>
+  <!-- 加载遮罩 -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <p>加载粒子宇宙...</p>
+  </div>
+
+  <!-- 状态栏 -->
+  <div id="status">⏳ 加载中...</div>
+
+  <!-- 右侧控制面板 -->
+  <div id="panel">
+    <div class="label">模型</div>
+    <button class="model-btn active" data-model="0">
+      <span class="icon">🌀</span><span class="name">星云</span>
+    </button>
+    <button class="model-btn" data-model="1">
+      <span class="icon">💥</span><span class="name">烟花</span>
+    </button>
+    <button class="model-btn" data-model="2">
+      <span class="icon">🪐</span><span class="name">土星</span>
+    </button>
+    <button class="model-btn" data-model="3">
+      <span class="icon">🌸</span><span class="name">花朵</span>
+    </button>
+    <button class="model-btn" data-model="4">
+      <span class="icon">🌌</span><span class="name">银河</span>
+    </button>
+    <button class="model-btn" data-model="5">
+      <span class="icon">✨</span><span class="name">星尘</span>
+    </button>
+
+    <div class="label" style="margin-top:16px;">颜色</div>
+    <div class="color-picker-wrap">
+      <input type="color" id="base-color" value="#4488ff">
+    </div>
+
+    <div class="label">密度</div>
+    <div class="slider-wrap">
+      <input type="range" id="density-slider" min="5000" max="60000" step="1000" value="30000">
+      <span class="val" id="density-val">30k</span>
+    </div>
+  </div>
+
+  <!-- 全屏 -->
+  <button id="fullscreen-btn">⛶</button>
+
+  <!-- 左下提示 -->
+  <div id="hint">张开手掌 · 控制粒子 · 挥手引爆</div>
+
+</body>
+</html>
