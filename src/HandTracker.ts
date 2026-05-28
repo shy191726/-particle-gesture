@@ -53,34 +53,31 @@ export async function initHandTracker(): Promise<void> {
   const wasmFileset = await FilesetResolver.forVisionTasks(WASM_BASE);
   console.log("[HandTracker] WASM 加载完成");
 
-  // 4. 创建 HandLandmarker（优先 GPU，失败回退 CPU）
-  console.log("[HandTracker] 创建 HandLandmarker (GPU)...");
-  try {
-    handLandmarker = await HandLandmarker.createFromOptions(wasmFileset, {
-      baseOptions: {
-        modelAssetPath: MODEL_PATH,
-        delegate: "GPU",
-      },
-      canvas: gpuCanvas as HTMLCanvasElement,
+  // 4. 创建 HandLandmarker（优先 GPU，10 秒超时回退 CPU）
+  const mkLandmarker = (delegate: "GPU" | "CPU") =>
+    HandLandmarker.createFromOptions(wasmFileset, {
+      baseOptions: { modelAssetPath: MODEL_PATH, delegate },
+      ...(delegate === "GPU" ? { canvas: gpuCanvas as HTMLCanvasElement } : {}),
       runningMode: "VIDEO",
       numHands: 2,
       minHandDetectionConfidence: 0.7,
       minHandPresenceConfidence: 0.6,
       minTrackingConfidence: 0.6,
     });
-  } catch (gpuErr) {
-    console.warn("[HandTracker] GPU delegate 失败，回退 CPU:", gpuErr);
-    handLandmarker = await HandLandmarker.createFromOptions(wasmFileset, {
-      baseOptions: {
-        modelAssetPath: MODEL_PATH,
-        delegate: "CPU",
-      },
-      runningMode: "VIDEO",
-      numHands: 2,
-      minHandDetectionConfidence: 0.7,
-      minHandPresenceConfidence: 0.6,
-      minTrackingConfidence: 0.6,
-    });
+
+  console.log("[HandTracker] 创建 HandLandmarker (GPU, 10s 超时)...");
+  const gpuResult = await Promise.race([
+    mkLandmarker("GPU").then((h) => ({ type: "gpu" as const, hand: h })),
+    new Promise<{ type: "timeout" }>((resolve) =>
+      setTimeout(() => resolve({ type: "timeout" }), 10000)
+    ),
+  ]);
+
+  if (gpuResult.type === "gpu") {
+    handLandmarker = gpuResult.hand;
+  } else {
+    console.warn("[HandTracker] GPU 超时，回退 CPU...");
+    handLandmarker = await mkLandmarker("CPU");
   }
   console.log("[HandTracker] HandLandmarker 创建完成");
 
